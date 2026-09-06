@@ -1,0 +1,1494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FC Player Career Tracker</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Prop-types (Recharts dependency) -->
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <!-- Recharts -->
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-[#09090b] text-neutral-100 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+    const { 
+      LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+      Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis 
+    } = window.Recharts;
+
+    // Helper component to bridge Lucide JS icons into React
+    const createIcon = (kebabName) => ({ className = "w-4 h-4", ...props }) => {
+      const containerRef = React.useRef(null);
+      React.useEffect(() => {
+        if (containerRef.current && window.lucide) {
+          containerRef.current.innerHTML = `<i data-lucide="${kebabName}"></i>`;
+          window.lucide.createIcons({
+            root: containerRef.current,
+            nameAttr: 'data-lucide',
+            attrs: { class: className }
+          });
+        }
+      }, [className]);
+      return <span ref={containerRef} className="inline-flex items-center justify-center" {...props} />;
+    };
+
+    const Trophy = createIcon('trophy');
+    const User = createIcon('user');
+    const Activity = createIcon('activity');
+    const BarChart3 = createIcon('bar-chart-3');
+    const Settings = createIcon('settings');
+    const Plus = createIcon('plus');
+    const Minus = createIcon('minus');
+    const Download = createIcon('download');
+    const Upload = createIcon('upload');
+    const Star = createIcon('star');
+    const Clock = createIcon('clock');
+    const ChevronRight = createIcon('chevron-right');
+    const ChevronDown = createIcon('chevron-down');
+    const CheckCircle2 = createIcon('check-circle-2');
+    const Shield = createIcon('shield');
+    const Users = createIcon('users');
+    const ArrowRightLeft = createIcon('arrow-right-left');
+    const Trash2 = createIcon('trash-2');
+    const Award = createIcon('award');
+    const Zap = createIcon('zap');
+    const AlertCircle = createIcon('alert-circle');
+    const X = createIcon('x');
+    const Edit3 = createIcon('edit-3');
+    const Sliders = createIcon('sliders');
+    const Check = createIcon('check');
+    const RotateCcw = createIcon('rotate-ccw');
+    const Sparkles = createIcon('sparkles');
+    const Eye = createIcon('eye');
+
+    // Sub-attributes configuration mapping
+    const SUB_STAT_CONFIG = {
+      PAC: {
+        label: '速度 (Pace)',
+        subStats: {
+          acceleration: '加速度 (Acceleration)',
+          sprintSpeed: '冲刺速度 (Sprint Speed)'
+        }
+      },
+      SHO: {
+        label: '射门 (Shooting)',
+        subStats: {
+          positioning: '进攻跑位 (Positioning)',
+          finishing: '射门 (Finishing)',
+          shotPower: '射门力量 (Shot Power)',
+          longShots: '远射 (Long Shots)',
+          volleys: '凌空抽射 (Volleys)',
+          penalties: '点球 (Penalties)'
+        }
+      },
+      PAS: {
+        label: '传球 (Passing)',
+        subStats: {
+          vision: '视野 (Vision)',
+          crossing: '传中 (Crossing)',
+          fkAccuracy: '任意球 (FK Accuracy)',
+          shortPassing: '短传 (Short Passing)',
+          longPassing: '长传 (Long Passing)',
+          curve: '弧线 (Curve)'
+        }
+      },
+      DRI: {
+        label: '盘带 (Dribbling)',
+        subStats: {
+          agility: '敏捷 (Agility)',
+          balance: '平衡 (Balance)',
+          reactions: '反应 (Reactions)',
+          ballControl: '控球 (Ball Control)',
+          dribbling: '盘带 (Dribbling)',
+          composure: '沉着 (Composure)'
+        }
+      },
+      DEF: {
+        label: '防守 (Defending)',
+        subStats: {
+          interceptions: '拦截 (Interceptions)',
+          headingAccuracy: '头球抢顶 (Heading)',
+          defAwareness: '防守意识 (Def. Awareness)',
+          standingTackle: '抢断 (Standing Tackle)',
+          slidingTackle: '铲球 (Sliding Tackle)'
+        }
+      },
+      PHY: {
+        label: '身体 (Physicality)',
+        subStats: {
+          jumping: '弹跳 (Jumping)',
+          stamina: '体能 (Stamina)',
+          strength: '力量 (Strength)',
+          aggression: '侵略性 (Aggression)'
+        }
+      }
+    };
+
+    // Default position weights for standard OVR calculation
+    const DEFAULT_POSITION_WEIGHTS = {
+      ST:  { PAC: 0.20, SHO: 0.35, PAS: 0.05, DRI: 0.20, DEF: 0.00, PHY: 0.20 },
+      CF:  { PAC: 0.20, SHO: 0.30, PAS: 0.15, DRI: 0.25, DEF: 0.00, PHY: 0.10 },
+      LW:  { PAC: 0.30, SHO: 0.20, PAS: 0.15, DRI: 0.25, DEF: 0.00, PHY: 0.10 },
+      RW:  { PAC: 0.30, SHO: 0.20, PAS: 0.15, DRI: 0.25, DEF: 0.00, PHY: 0.10 },
+      CAM: { PAC: 0.10, SHO: 0.20, PAS: 0.35, DRI: 0.25, DEF: 0.05, PHY: 0.05 },
+      CM:  { PAC: 0.10, SHO: 0.15, PAS: 0.25, DRI: 0.20, DEF: 0.15, PHY: 0.15 },
+      CDM: { PAC: 0.10, SHO: 0.05, PAS: 0.20, DRI: 0.10, DEF: 0.30, PHY: 0.25 },
+      CB:  { PAC: 0.15, SHO: 0.00, PAS: 0.05, DRI: 0.05, DEF: 0.40, PHY: 0.35 },
+      LB:  { PAC: 0.25, SHO: 0.05, PAS: 0.15, DRI: 0.15, DEF: 0.25, PHY: 0.15 },
+      RB:  { PAC: 0.25, SHO: 0.05, PAS: 0.15, DRI: 0.15, DEF: 0.25, PHY: 0.15 }
+    };
+
+    const calculateMacroStat = (macroKey, attrObj) => {
+      if (!attrObj || !attrObj[macroKey]) return 70;
+      const macroData = attrObj[macroKey];
+      if (macroData.override !== null && macroData.override !== undefined) {
+        return macroData.override;
+      }
+      const subs = Object.values(macroData.subStats || {});
+      if (subs.length === 0) return 70;
+      const avg = subs.reduce((sum, val) => sum + val, 0) / subs.length;
+      return Math.round(avg);
+    };
+
+    const getMacroStatsObject = (attrObj) => {
+      const result = {};
+      Object.keys(SUB_STAT_CONFIG).forEach(key => {
+        result[key] = calculateMacroStat(key, attrObj);
+      });
+      return result;
+    };
+
+    const calculateOVR = (player) => {
+      if (!player) return 60;
+      if (player.customOvr !== null && player.customOvr !== undefined) {
+        return player.customOvr;
+      }
+      const macros = getMacroStatsObject(player.attributes);
+      const pos = player.profile?.position || 'ST';
+      const weights = player.customWeights || DEFAULT_POSITION_WEIGHTS[pos] || DEFAULT_POSITION_WEIGHTS.ST;
+      
+      let weightedSum = 0;
+      let weightTotal = 0;
+      Object.keys(macros).forEach(key => {
+        const w = weights[key] !== undefined ? weights[key] : 1/6;
+        weightedSum += macros[key] * w;
+        weightTotal += w;
+      });
+
+      if (weightTotal > 0) {
+        return Math.round(weightedSum / weightTotal);
+      }
+      return Math.round((macros.PAC + macros.SHO + macros.PAS + macros.DRI + macros.DEF + macros.PHY) / 6);
+    };
+
+    const COMPARE_COLORS = [
+      { stroke: '#f59e0b', fill: '#f59e0b', text: 'text-amber-400', bg: 'bg-amber-500', border: 'border-amber-500' },
+      { stroke: '#06b6d4', fill: '#06b6d4', text: 'text-cyan-400', bg: 'bg-cyan-500', border: 'border-cyan-500' },
+      { stroke: '#10b981', fill: '#10b981', text: 'text-emerald-400', bg: 'bg-emerald-500', border: 'border-emerald-500' },
+      { stroke: '#ec4899', fill: '#ec4899', text: 'text-pink-400', bg: 'bg-pink-500', border: 'border-pink-500' },
+      { stroke: '#8b5cf6', fill: '#8b5cf6', text: 'text-purple-400', bg: 'bg-purple-500', border: 'border-purple-500' },
+      { stroke: '#f97316', fill: '#f97316', text: 'text-orange-400', bg: 'bg-orange-500', border: 'border-orange-500' }
+    ];
+
+    const getRatingColor = (rating) => {
+      if (rating >= 8.5) return 'text-emerald-400';
+      if (rating >= 7.0) return 'text-amber-400';
+      if (rating >= 6.0) return 'text-yellow-400';
+      return 'text-rose-400';
+    };
+
+    const getStatColor = (val) => {
+      if (val >= 90) return 'text-emerald-400 font-black';
+      if (val >= 80) return 'text-amber-400 font-bold';
+      if (val >= 70) return 'text-yellow-400 font-bold';
+      if (val >= 60) return 'text-neutral-300 font-medium';
+      return 'text-rose-400 font-medium';
+    };
+
+    const DEFAULT_PLAYERS = [
+      {
+        id: 'player_1',
+        profile: {
+          name: "Alex Hunter",
+          position: "ST",
+          nationality: "England",
+          club: "Real Madrid",
+          age: 20,
+          potential: 92,
+          weakFoot: 4,
+          skillMoves: 4,
+          traits: ["Finesse Shot", "Speed Dribbler", "Outside Foot Shot"]
+        },
+        customOvr: null,
+        customWeights: null,
+        attributes: {
+          PAC: { override: null, subStats: { acceleration: 88, sprintSpeed: 91 } },
+          SHO: { override: null, subStats: { positioning: 87, finishing: 89, shotPower: 86, longShots: 80, volleys: 82, penalties: 84 } },
+          PAS: { override: null, subStats: { vision: 78, crossing: 72, fkAccuracy: 70, shortPassing: 81, longPassing: 74, curve: 76 } },
+          DRI: { override: null, subStats: { agility: 86, balance: 82, reactions: 88, ballControl: 87, dribbling: 88, composure: 85 } },
+          DEF: { override: null, subStats: { interceptions: 32, headingAccuracy: 78, defAwareness: 35, standingTackle: 38, slidingTackle: 30 } },
+          PHY: { override: null, subStats: { jumping: 80, stamina: 82, strength: 78, aggression: 72 } }
+        },
+        matches: [
+          { id: 'm1', date: '2026-08-15', opponent: 'Sevilla FC', minutes: 90, isStarter: true, goals: 2, assists: 1, rating: 8.8, notes: '梅开二度，展现极强爆发力。' },
+          { id: 'm2', date: '2026-08-22', opponent: 'Atlético Madrid', minutes: 88, isStarter: true, goals: 1, assists: 0, rating: 7.9, notes: '强硬头球破门。' }
+        ]
+      },
+      {
+        id: 'player_2',
+        profile: {
+          name: "Mateo Silva",
+          position: "CAM",
+          nationality: "Portugal",
+          club: "FC Barcelona",
+          age: 21,
+          potential: 91,
+          weakFoot: 5,
+          skillMoves: 5,
+          traits: ["Playmaker", "Technical Dribbler", "Through Passer"]
+        },
+        customOvr: null,
+        customWeights: null,
+        attributes: {
+          PAC: { override: null, subStats: { acceleration: 82, sprintSpeed: 78 } },
+          SHO: { override: null, subStats: { positioning: 82, finishing: 80, shotPower: 82, longShots: 86, volleys: 78, penalties: 80 } },
+          PAS: { override: null, subStats: { vision: 92, crossing: 86, fkAccuracy: 88, shortPassing: 93, longPassing: 90, curve: 89 } },
+          DRI: { override: null, subStats: { agility: 90, balance: 88, reactions: 86, ballControl: 93, dribbling: 91, composure: 90 } },
+          DEF: { override: null, subStats: { interceptions: 55, headingAccuracy: 50, defAwareness: 52, standingTackle: 56, slidingTackle: 48 } },
+          PHY: { override: null, subStats: { jumping: 62, stamina: 84, strength: 66, aggression: 60 } }
+        },
+        matches: [
+          { id: 'm1_p2', date: '2026-08-18', opponent: 'Valencia CF', minutes: 90, isStarter: true, goals: 0, assists: 3, rating: 9.3, notes: '中场大师演出，精准直塞上演助攻帽子戏法。' }
+        ]
+      },
+      {
+        id: 'player_3',
+        profile: {
+          name: "Lucas Romero",
+          position: "CB",
+          nationality: "Argentina",
+          club: "Inter Milan",
+          age: 23,
+          potential: 89,
+          weakFoot: 3,
+          skillMoves: 2,
+          traits: ["Power Header", "Slide Tackler", "Leadership"]
+        },
+        customOvr: 87,
+        customWeights: null,
+        attributes: {
+          PAC: { override: 78, subStats: { acceleration: 76, sprintSpeed: 80 } },
+          SHO: { override: null, subStats: { positioning: 42, finishing: 38, shotPower: 72, longShots: 40, volleys: 35, penalties: 45 } },
+          PAS: { override: null, subStats: { vision: 65, crossing: 52, fkAccuracy: 40, shortPassing: 78, longPassing: 82, curve: 48 } },
+          DRI: { override: null, subStats: { agility: 68, balance: 72, reactions: 85, ballControl: 74, dribbling: 66, composure: 84 } },
+          DEF: { override: null, subStats: { interceptions: 89, headingAccuracy: 90, defAwareness: 88, standingTackle: 91, slidingTackle: 88 } },
+          PHY: { override: null, subStats: { jumping: 92, stamina: 86, strength: 91, aggression: 93 } }
+        },
+        matches: [
+          { id: 'm1_p3', date: '2026-08-20', opponent: 'AC Milan', minutes: 90, isStarter: true, goals: 1, assists: 0, rating: 8.5, notes: '角球头球轰门绝杀，后防零封对手。' }
+        ]
+      }
+    ];
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [toastMessage, setToastMessage] = useState(null);
+
+      const [players, setPlayers] = useState(() => {
+        const saved = localStorage.getItem('fc_career_players_v2');
+        if (saved) {
+          try { return JSON.parse(saved); } catch (e) {}
+        }
+        return DEFAULT_PLAYERS;
+      });
+
+      const [activePlayerId, setActivePlayerId] = useState(() => players[0]?.id || 'player_1');
+      
+      const [comparePlayerIds, setComparePlayerIds] = useState(() => {
+        return players.length >= 2 ? [players[0].id, players[1].id] : [players[0]?.id].filter(Boolean);
+      });
+
+      useEffect(() => {
+        localStorage.setItem('fc_career_players_v2', JSON.stringify(players));
+      }, [players]);
+
+      const showToast = (msg, type = 'info') => {
+        setToastMessage({ text: msg, type });
+        setTimeout(() => setToastMessage(null), 3500);
+      };
+
+      const activePlayer = useMemo(() => {
+        return players.find(p => p.id === activePlayerId) || players[0];
+      }, [players, activePlayerId]);
+
+      const comparePlayers = useMemo(() => {
+        return players.filter(p => comparePlayerIds.includes(p.id));
+      }, [players, comparePlayerIds]);
+
+      const getGrowthData = (player) => {
+        if (!player) return [];
+        let currentAttributes = JSON.parse(JSON.stringify(player.attributes));
+        const data = [{ name: '初始', OVR: calculateOVR(player) }];
+
+        player.matches.forEach((m, idx) => {
+          data.push({
+            name: `M${idx + 1}`,
+            OVR: calculateOVR({ ...player, attributes: currentAttributes })
+          });
+        });
+        return data;
+      };
+
+      const handleAddNewPlayer = (newProfile) => {
+        const newPlayer = {
+          id: `player_${Date.now()}`,
+          profile: newProfile,
+          customOvr: null,
+          customWeights: null,
+          attributes: {
+            PAC: { override: null, subStats: { acceleration: 75, sprintSpeed: 75 } },
+            SHO: { override: null, subStats: { positioning: 70, finishing: 70, shotPower: 70, longShots: 70, volleys: 65, penalties: 65 } },
+            PAS: { override: null, subStats: { vision: 70, crossing: 68, fkAccuracy: 65, shortPassing: 72, longPassing: 70, curve: 68 } },
+            DRI: { override: null, subStats: { agility: 75, balance: 72, reactions: 74, ballControl: 75, dribbling: 76, composure: 72 } },
+            DEF: { override: null, subStats: { interceptions: 50, headingAccuracy: 60, defAwareness: 55, standingTackle: 55, slidingTackle: 52 } },
+            PHY: { override: null, subStats: { jumping: 70, stamina: 75, strength: 70, aggression: 68 } }
+          },
+          matches: []
+        };
+
+        setPlayers(prev => [...prev, newPlayer]);
+        setActivePlayerId(newPlayer.id);
+        if (!comparePlayerIds.includes(newPlayer.id)) {
+          setComparePlayerIds(prev => [...prev, newPlayer.id]);
+        }
+        showToast(`创建新球员: ${newProfile.name}`, 'success');
+      };
+
+      const handleDeletePlayer = (id) => {
+        if (players.length <= 1) {
+          showToast('至少需要保留 1 名球员档案', 'warning');
+          return;
+        }
+        const filtered = players.filter(p => p.id !== id);
+        setPlayers(filtered);
+        setComparePlayerIds(prev => prev.filter(pId => pId !== id));
+        if (activePlayerId === id) setActivePlayerId(filtered[0].id);
+        showToast('已成功移除球员档案', 'info');
+      };
+
+      const handleUpdatePlayerAttributes = (updatedAttributes, customOvr, customWeights) => {
+        setPlayers(prev => prev.map(p => {
+          if (p.id === activePlayer.id) {
+            return {
+              ...p,
+              attributes: updatedAttributes,
+              customOvr: customOvr,
+              customWeights: customWeights
+            };
+          }
+          return p;
+        }));
+        showToast(`${activePlayer.profile.name} 的详细能力数据已更新！`, 'success');
+      };
+
+      const handleAddMatch = (matchData, updatedAttrs) => {
+        setPlayers(prev => prev.map(p => {
+          if (p.id === activePlayer.id) {
+            return {
+              ...p,
+              attributes: updatedAttrs || p.attributes,
+              matches: [...p.matches, matchData]
+            };
+          }
+          return p;
+        }));
+        showToast(`比赛记录已添加，能力升降更新成功！`, 'success');
+        setActiveTab('history');
+      };
+
+      const handleExportData = () => {
+        const dataStr = JSON.stringify(players, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FC_Career_Tracker_Export_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('完整球员数据库备份导出成功', 'success');
+      };
+
+      const handleImportData = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const imported = JSON.parse(event.target.result);
+            if (Array.isArray(imported) && imported.length > 0) {
+              setPlayers(imported);
+              setActivePlayerId(imported[0].id);
+              setComparePlayerIds(imported.slice(0, 3).map(p => p.id));
+              showToast('已成功导入球员数据包！', 'success');
+            } else {
+              showToast('JSON 数据格式错误', 'warning');
+            }
+          } catch (err) {
+            showToast('读取备份文件失败', 'warning');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const renderNav = () => (
+        <nav className="sticky top-0 z-50 bg-neutral-950/90 backdrop-blur-md border-b border-amber-500/20 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="flex items-center justify-between w-full md:w-auto">
+              <div className="flex items-center gap-2">
+                <Shield className="w-7 h-7 text-amber-500" />
+                <span className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-yellow-500 tracking-wider">
+                  FC CAREER PRO
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1">
+                <User className="w-4 h-4 text-amber-500" />
+                <select 
+                  value={activePlayerId} 
+                  onChange={(e) => setActivePlayerId(e.target.value)}
+                  className="bg-transparent text-xs md:text-sm font-bold text-amber-100 focus:outline-none cursor-pointer"
+                >
+                  {players.map(p => (
+                    <option key={p.id} value={p.id} className="bg-neutral-900 text-white">
+                      {p.profile.name} ({p.profile.position} - OVR {calculateOVR(p)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-around w-full md:w-auto gap-1 md:gap-2 overflow-x-auto py-1">
+              {[
+                { id: 'dashboard', icon: Trophy, label: '球员概览' },
+                { id: 'compare', icon: ArrowRightLeft, label: `多员对比 (${comparePlayerIds.length})` },
+                { id: 'attributes', icon: Sliders, label: '详细数值编辑' },
+                { id: 'add_match', icon: Plus, label: '录入比赛' },
+                { id: 'history', icon: Activity, label: '比赛履历' },
+                { id: 'settings', icon: Settings, label: '球员数据库' }
+              ].map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs md:text-sm font-bold transition-all whitespace-nowrap ${
+                    activeTab === item.id 
+                      ? 'text-black bg-gradient-to-r from-amber-400 to-yellow-500 shadow-lg shadow-amber-500/20' 
+                      : 'text-neutral-400 hover:text-amber-200 hover:bg-neutral-900'
+                  }`}
+                >
+                  <item.icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </nav>
+      );
+
+      return (
+        <div className="min-h-screen bg-[#09090b] text-neutral-100 font-sans pb-16 selection:bg-amber-500/30">
+          {renderNav()}
+
+          {toastMessage && (
+            <div className="fixed top-16 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-md bg-neutral-900/95 border-amber-500/40 text-amber-200 animate-in fade-in slide-in-from-top-2">
+              <AlertCircle className="w-5 h-5 text-amber-400" />
+              <span className="text-xs md:text-sm font-bold">{toastMessage.text}</span>
+              <button onClick={() => setToastMessage(null)} className="ml-2 text-neutral-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+            {activeTab === 'dashboard' && (
+              <Dashboard 
+                player={activePlayer}
+                growthData={getGrowthData(activePlayer)}
+                onOpenEditor={() => setActiveTab('attributes')}
+              />
+            )}
+
+            {activeTab === 'compare' && (
+              <MultiPlayerCompareView 
+                players={players}
+                comparePlayerIds={comparePlayerIds}
+                setComparePlayerIds={setComparePlayerIds}
+                getGrowthData={getGrowthData}
+              />
+            )}
+
+            {activeTab === 'attributes' && (
+              <AttributeEditorTab 
+                player={activePlayer}
+                onSave={handleUpdatePlayerAttributes}
+              />
+            )}
+            
+            {activeTab === 'add_match' && (
+              <MatchForm 
+                player={activePlayer}
+                onSave={handleAddMatch}
+              />
+            )}
+            
+            {activeTab === 'history' && (
+              <MatchHistory player={activePlayer} />
+            )}
+            
+            {activeTab === 'settings' && (
+              <PlayerManager 
+                players={players}
+                activePlayer={activePlayer}
+                setActivePlayerId={setActivePlayerId}
+                onAddNewPlayer={handleAddNewPlayer}
+                onDeletePlayer={handleDeletePlayer}
+                onExport={handleExportData}
+                onImport={handleImportData}
+              />
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    function Dashboard({ player, growthData, onOpenEditor }) {
+      const [expandedMacro, setExpandedMacro] = useState('PAC');
+      const ovr = calculateOVR(player);
+      const macroStats = getMacroStatsObject(player.attributes);
+
+      const radarData = Object.keys(SUB_STAT_CONFIG).map(key => ({
+        subject: key,
+        A: macroStats[key],
+        fullMark: 99
+      }));
+
+      const matches = player.matches || [];
+      const totalGoals = matches.reduce((sum, m) => sum + (m.goals || 0), 0);
+      const totalAssists = matches.reduce((sum, m) => sum + (m.assists || 0), 0);
+      const avgRating = matches.length > 0 
+        ? (matches.reduce((sum, m) => sum + (m.rating || 0), 0) / matches.length).toFixed(1) 
+        : '-';
+
+      return (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-4 flex justify-center">
+              <FutCard player={player} />
+            </div>
+
+            <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-5 flex flex-col justify-between relative">
+                 <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">宏观六维属性</span>
+                    </div>
+                    {player.customOvr !== null && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded font-bold">
+                        手动自定义 OVR
+                      </span>
+                    )}
+                 </div>
+                 
+                 <div className="w-full h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart cx="50%" cy="50%" outerRadius="68%" data={radarData}>
+                        <PolarGrid stroke="#262626" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#d4d4d4', fontSize: 12, fontWeight: 'bold' }} />
+                        <PolarRadiusAxis angle={30} domain={[0, 99]} tick={false} axisLine={false} />
+                        <Radar name={player.profile.name} dataKey="A" stroke="#f59e0b" strokeWidth={2.5} fill="#f59e0b" fillOpacity={0.35} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
+
+              <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                      <Trophy className="w-4 h-4 text-amber-500" /> 生涯绩效指标
+                    </span>
+                    <button onClick={onOpenEditor} className="text-xs text-amber-400 hover:underline flex items-center gap-1 font-bold">
+                      <Edit3 className="w-3.5 h-3.5" /> 修改详细属性
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatBox icon={Activity} label="出场次数" value={matches.length} />
+                    <StatBox icon={Star} label="平均评分" value={avgRating} color="text-amber-400" />
+                    <StatBox icon={Trophy} label="生涯进球" value={totalGoals} color="text-emerald-400" />
+                    <StatBox icon={Award} label="生涯助攻" value={totalAssists} color="text-cyan-400" />
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-neutral-800/80 space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-neutral-400 font-bold">
+                    <span>潜力评级 (POT)</span>
+                    <span className="text-amber-400 font-extrabold">{player.profile.potential || '90'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-neutral-400 font-bold">
+                    <span>特性 (Traits)</span>
+                    <span className="text-neutral-200 truncate max-w-[180px]">{player.profile.traits?.join(', ') || '无'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h3 className="text-sm font-bold text-neutral-300 uppercase tracking-widest flex items-center gap-2">
+                <Eye className="w-4 h-4 text-amber-500" /> 细化属性得分展开 (Sub-Attributes)
+              </h3>
+              <span className="text-xs text-neutral-500">点击各大类可查看或展开子项目</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {Object.keys(SUB_STAT_CONFIG).map(macroKey => {
+                const isSelected = expandedMacro === macroKey;
+                const macroVal = macroStats[macroKey];
+                const isOverridden = player.attributes[macroKey]?.override !== null && player.attributes[macroKey]?.override !== undefined;
+
+                return (
+                  <button
+                    key={macroKey}
+                    onClick={() => setExpandedMacro(macroKey)}
+                    className={`p-3 rounded-xl border text-left transition-all relative ${
+                      isSelected 
+                        ? 'bg-amber-500/10 border-amber-500/80 shadow-md' 
+                        : 'bg-neutral-950/60 border-neutral-800 hover:border-neutral-700'
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold text-neutral-400 uppercase">{SUB_STAT_CONFIG[macroKey].label}</div>
+                    <div className={`text-xl font-black mt-1 ${getStatColor(macroVal)}`}>{macroVal}</div>
+                    {isOverridden && (
+                      <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-amber-400" title="该属性为手动覆盖值" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {expandedMacro && (
+              <div className="bg-neutral-950/80 rounded-xl p-4 border border-neutral-800/80 animate-in fade-in duration-200">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-xs font-bold text-amber-400 uppercase">
+                    {SUB_STAT_CONFIG[expandedMacro].label} - 子项明细
+                  </span>
+                  {player.attributes[expandedMacro]?.override !== null && (
+                    <span className="text-[11px] text-amber-400 italic">
+                      * 提示：大类得分已重写为 {player.attributes[expandedMacro].override} (未取子项平均)
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {Object.entries(SUB_STAT_CONFIG[expandedMacro].subStats).map(([subKey, subName]) => {
+                    const subVal = player.attributes[expandedMacro]?.subStats[subKey] || 70;
+                    return (
+                      <div key={subKey} className="flex justify-between items-center bg-neutral-900/90 px-3 py-2 rounded-lg border border-neutral-800/60">
+                        <span className="text-xs text-neutral-300 font-bold">{subName}</span>
+                        <span className={`text-xs ${getStatColor(subVal)}`}>{subVal}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6">
+            <h3 className="text-sm font-bold text-neutral-300 uppercase tracking-widest mb-6 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-amber-500" /> 生涯成长轨迹 (OVR Timeline)
+            </h3>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={growthData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+                  <XAxis dataKey="name" stroke="#525252" tick={{fill: '#a3a3a3', fontSize: 12}} />
+                  <YAxis domain={['dataMin - 2', 'dataMax + 2']} stroke="#525252" tick={{fill: '#a3a3a3'}} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#171717', borderColor: '#404040', borderRadius: '12px' }}
+                    itemStyle={{ color: '#fbbf24', fontWeight: 'bold' }}
+                  />
+                  <Line type="monotone" dataKey="OVR" stroke="#f59e0b" strokeWidth={3} dot={{r: 4, fill: '#09090b', stroke: '#f59e0b', strokeWidth: 2}} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function FutCard({ player, colorStyle = COMPARE_COLORS[0] }) {
+      const ovr = calculateOVR(player);
+      const macros = getMacroStatsObject(player.attributes);
+      const { profile } = player;
+
+      return (
+        <div className={`relative w-64 h-96 rounded-2xl p-1 bg-gradient-to-br from-amber-200 via-amber-500 to-amber-800 shadow-2xl group hover:scale-[1.02] transition-transform duration-300`}>
+          <div className="w-full h-full bg-[#141416] rounded-[14px] p-4 flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-start z-10 relative">
+              <div className="flex flex-col items-center">
+                <span className="text-4xl font-black text-white leading-none tracking-tighter">{ovr}</span>
+                <span className="text-xs font-black text-amber-400 uppercase tracking-widest mt-0.5">{profile.position}</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-8 h-5 bg-neutral-800 border border-neutral-700 rounded flex items-center justify-center text-[9px] font-bold text-neutral-300">
+                  {profile.nationality ? profile.nationality.slice(0, 3).toUpperCase() : 'NAT'}
+                </div>
+                <div className="text-[9px] font-extrabold text-neutral-400 max-w-[65px] truncate text-center">
+                  {profile.club || 'FREE'}
+                </div>
+              </div>
+            </div>
+
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 w-44 h-44 opacity-20">
+              <svg viewBox="0 0 200 200" className="w-full h-full text-neutral-200">
+                <path fill="currentColor" d="M100 100c22.091 0 40-17.909 40-40s-17.909-40-40-40-40 17.909-40 40 17.909 40 40 40zm0 20c-26.667 0-80 13.333-80 40v20h160v-20c0-26.667-53.333-40-80-40z" />
+              </svg>
+            </div>
+
+            <div className="mt-auto z-10 relative">
+              <div className="text-center border-b border-neutral-800 pb-2 mb-2">
+                <h2 className="text-base font-black uppercase tracking-wider text-neutral-100 truncate">{profile.name}</h2>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-bold">
+                {['PAC', 'DRI', 'SHO', 'DEF', 'PAS', 'PHY'].map((statKey) => (
+                  <div key={statKey} className="flex justify-between items-center">
+                    <span className="text-neutral-500">{statKey}</span>
+                    <span className={getStatColor(macros[statKey])}>{macros[statKey]}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function MultiPlayerCompareView({ players, comparePlayerIds, setComparePlayerIds, getGrowthData }) {
+      const [expandedRow, setExpandedRow] = useState(null);
+
+      const togglePlayerSelection = (id) => {
+        if (comparePlayerIds.includes(id)) {
+          if (comparePlayerIds.length <= 2) {
+            return;
+          }
+          setComparePlayerIds(comparePlayerIds.filter(pId => pId !== id));
+        } else {
+          setComparePlayerIds([...comparePlayerIds, id]);
+        }
+      };
+
+      const selectedPlayers = players.filter(p => comparePlayerIds.includes(p.id));
+
+      const radarComparisonData = Object.keys(SUB_STAT_CONFIG).map(macroKey => {
+        const row = { subject: macroKey };
+        selectedPlayers.forEach((p) => {
+          row[p.id] = calculateMacroStat(macroKey, p.attributes);
+        });
+        return row;
+      });
+
+      const playerGrowthMaps = selectedPlayers.map(p => ({
+        player: p,
+        data: getGrowthData(p)
+      }));
+
+      const maxTimelineLen = Math.max(...playerGrowthMaps.map(m => m.data.length), 0);
+      const multiGrowthData = Array.from({ length: maxTimelineLen }).map((_, i) => {
+        const row = { name: i === 0 ? '初始' : `M${i}` };
+        playerGrowthMaps.forEach(({ player, data }) => {
+          row[player.profile.name] = data[i] ? data[i].OVR : null;
+        });
+        return row;
+      });
+
+      return (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-5 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-amber-500" />
+                <h2 className="text-base font-black text-white">多球员竞技场（支持 2 名及以上对比）</h2>
+              </div>
+              <span className="text-xs text-neutral-400">已选中 {selectedPlayers.length} 名球员进行深度比对</span>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              {players.map((p, idx) => {
+                const isSelected = comparePlayerIds.includes(p.id);
+                const colorObj = COMPARE_COLORS[comparePlayerIds.indexOf(p.id) % COMPARE_COLORS.length] || COMPARE_COLORS[0];
+
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => togglePlayerSelection(p.id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                      isSelected 
+                        ? `bg-neutral-900 ${colorObj.border} text-white shadow-md` 
+                        : 'bg-neutral-950 border-neutral-800 text-neutral-500 hover:text-neutral-300'
+                    }`}
+                  >
+                    <div className={`w-3 h-3 rounded-full ${isSelected ? colorObj.bg : 'bg-neutral-700'}`} />
+                    <span>{p.profile.name} (OVR {calculateOVR(p)})</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 justify-items-center">
+            {selectedPlayers.map((p, idx) => (
+              <div key={p.id} className="flex flex-col items-center space-y-2">
+                <span className={`text-xs font-bold ${COMPARE_COLORS[idx % COMPARE_COLORS.length].text}`}>
+                  ● {p.profile.name}
+                </span>
+                <FutCard player={p} colorStyle={COMPARE_COLORS[idx % COMPARE_COLORS.length]} />
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500" /> 多维属性雷达模型重叠
+              </h3>
+              <div className="flex flex-wrap gap-3 text-xs">
+                {selectedPlayers.map((p, idx) => (
+                  <span key={p.id} className={`font-bold ${COMPARE_COLORS[idx % COMPARE_COLORS.length].text}`}>
+                    ● {p.profile.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-full h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarComparisonData}>
+                  <PolarGrid stroke="#262626" />
+                  <PolarAngleAxis dataKey="subject" tick={{ fill: '#d4d4d4', fontSize: 12, fontWeight: 'bold' }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 99]} tick={false} axisLine={false} />
+                  {selectedPlayers.map((p, idx) => {
+                    const color = COMPARE_COLORS[idx % COMPARE_COLORS.length];
+                    return (
+                      <Radar 
+                        key={p.id}
+                        name={p.profile.name} 
+                        dataKey={p.id} 
+                        stroke={color.stroke} 
+                        fill={color.fill} 
+                        fillOpacity={0.25} 
+                        strokeWidth={2}
+                      />
+                    );
+                  })}
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6 space-y-4 overflow-x-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-amber-500" /> 多人明细数据矩阵对决 (矩阵列表)
+              </h3>
+              <span className="text-xs text-neutral-500">点击各大类查看所有球员的具体子项数值</span>
+            </div>
+
+            <table className="w-full text-left border-collapse min-w-[600px]">
+              <thead>
+                <tr className="border-b border-neutral-800 text-xs text-neutral-400">
+                  <th className="py-3 px-4">对比维度 / 属性</th>
+                  {selectedPlayers.map((p, idx) => (
+                    <th key={p.id} className={`py-3 px-4 font-black ${COMPARE_COLORS[idx % COMPARE_COLORS.length].text}`}>
+                      {p.profile.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-xs divide-y divide-neutral-800/60">
+                <tr className="bg-neutral-950/60 font-black">
+                  <td className="py-3 px-4 text-amber-400">综合能力 (OVR)</td>
+                  {selectedPlayers.map(p => {
+                    const ovrVal = calculateOVR(p);
+                    const isHighest = ovrVal === Math.max(...selectedPlayers.map(sp => calculateOVR(sp)));
+                    return (
+                      <td key={p.id} className={`py-3 px-4 text-sm ${isHighest ? 'text-emerald-400 font-extrabold' : 'text-neutral-200'}`}>
+                        {ovrVal} {isHighest && '★'}
+                      </td>
+                    );
+                  })}
+                </tr>
+
+                {Object.keys(SUB_STAT_CONFIG).map(macroKey => {
+                  const isExpanded = expandedRow === macroKey;
+                  const macroVals = selectedPlayers.map(p => calculateMacroStat(macroKey, p.attributes));
+                  const maxVal = Math.max(...macroVals);
+
+                  return (
+                    <React.Fragment key={macroKey}>
+                      <tr 
+                        onClick={() => setExpandedRow(isExpanded ? null : macroKey)}
+                        className="hover:bg-neutral-800/40 cursor-pointer transition-colors"
+                      >
+                        <td className="py-3 px-4 font-bold text-neutral-200 flex items-center gap-2">
+                          {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-amber-500" /> : <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />}
+                          {SUB_STAT_CONFIG[macroKey].label}
+                        </td>
+                        {selectedPlayers.map((p, idx) => {
+                          const val = calculateMacroStat(macroKey, p.attributes);
+                          const isMax = val === maxVal;
+                          return (
+                            <td key={p.id} className={`py-3 px-4 font-bold ${isMax ? 'text-emerald-400 font-black' : 'text-neutral-300'}`}>
+                              {val} {isMax && '👑'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+
+                      {isExpanded && Object.entries(SUB_STAT_CONFIG[macroKey].subStats).map(([subKey, subName]) => {
+                        const subVals = selectedPlayers.map(p => p.attributes[macroKey]?.subStats[subKey] || 70);
+                        const maxSubVal = Math.max(...subVals);
+
+                        return (
+                          <tr key={subKey} className="bg-neutral-950/90 text-neutral-400 italic">
+                            <td className="py-2 px-8 text-[11px] font-medium">{subName}</td>
+                            {selectedPlayers.map(p => {
+                              const val = p.attributes[macroKey]?.subStats[subKey] || 70;
+                              const isSubMax = val === maxSubVal;
+                              return (
+                                <td key={p.id} className={`py-2 px-4 text-[11px] ${isSubMax ? 'text-amber-300 font-bold' : 'text-neutral-400'}`}>
+                                  {val}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6">
+            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest mb-6">多人生涯成长轨迹叠合</h3>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={multiGrowthData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+                  <XAxis dataKey="name" stroke="#525252" tick={{fill: '#a3a3a3'}} />
+                  <YAxis domain={['dataMin - 2', 'dataMax + 2']} stroke="#525252" tick={{fill: '#a3a3a3'}} />
+                  <Tooltip contentStyle={{ backgroundColor: '#171717', borderColor: '#404040', borderRadius: '12px' }} />
+                  <Legend />
+                  {selectedPlayers.map((p, idx) => (
+                    <Line 
+                      key={p.id}
+                      type="monotone" 
+                      dataKey={p.profile.name} 
+                      stroke={COMPARE_COLORS[idx % COMPARE_COLORS.length].stroke} 
+                      strokeWidth={2.5} 
+                      connectNulls 
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function AttributeEditorTab({ player, onSave }) {
+      const [attributes, setAttributes] = useState(player.attributes);
+      const [customOvr, setCustomOvr] = useState(player.customOvr);
+      const [useCustomOvr, setUseCustomOvr] = useState(player.customOvr !== null);
+
+      useEffect(() => {
+        setAttributes(player.attributes);
+        setCustomOvr(player.customOvr);
+        setUseCustomOvr(player.customOvr !== null);
+      }, [player]);
+
+      const handleSubStatChange = (macroKey, subKey, value) => {
+        const val = Math.min(99, Math.max(1, parseInt(value) || 0));
+        setAttributes(prev => ({
+          ...prev,
+          [macroKey]: {
+            ...prev[macroKey],
+            subStats: {
+              ...prev[macroKey].subStats,
+              [subKey]: val
+            }
+          }
+        }));
+      };
+
+      const handleToggleMacroOverride = (macroKey) => {
+        setAttributes(prev => {
+          const current = prev[macroKey].override;
+          return {
+            ...prev,
+            [macroKey]: {
+              ...prev[macroKey],
+              override: current === null ? calculateMacroStat(macroKey, prev) : null
+            }
+          };
+        });
+      };
+
+      const handleMacroOverrideChange = (macroKey, value) => {
+        const val = Math.min(99, Math.max(1, parseInt(value) || 0));
+        setAttributes(prev => ({
+          ...prev,
+          [macroKey]: {
+            ...prev[macroKey],
+            override: val
+          }
+        }));
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave(attributes, useCustomOvr ? customOvr : null, player.customWeights);
+      };
+
+      return (
+        <form onSubmit={handleSubmit} className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
+          <div className="bg-neutral-900/80 rounded-2xl border border-neutral-800 p-6 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+              <div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <Sliders className="text-amber-500" />
+                  精细属性与能力计算编辑器 - <span className="text-amber-400">{player.profile.name}</span>
+                </h2>
+                <p className="text-xs text-neutral-400 mt-1">支持自由调整加速度、冲刺速度等各项子属性，或者直接修改宏观能力值。</p>
+              </div>
+
+              <button type="submit" className="bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-black font-black px-6 py-2.5 rounded-xl shadow-lg shadow-amber-500/20 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" /> 保存数值修改
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-neutral-950 p-4 rounded-xl border border-neutral-800/80 gap-3">
+              <div className="flex items-center gap-3">
+                <input 
+                  type="checkbox" 
+                  id="customOvrToggle"
+                  checked={useCustomOvr}
+                  onChange={(e) => {
+                    setUseCustomOvr(e.target.checked);
+                    if (e.target.checked && customOvr === null) setCustomOvr(calculateOVR(player));
+                  }}
+                  className="w-4 h-4 text-amber-500 bg-neutral-900 border-neutral-800 rounded focus:ring-amber-500"
+                />
+                <label htmlFor="customOvrToggle" className="text-xs font-bold text-neutral-200 cursor-pointer">
+                  开启自定义 OVR (覆盖公式计算)
+                </label>
+              </div>
+
+              {useCustomOvr && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-neutral-400">手动指定 OVR:</span>
+                  <input 
+                    type="number" min="1" max="99"
+                    value={customOvr || 80}
+                    onChange={(e) => setCustomOvr(parseInt(e.target.value) || 80)}
+                    className="w-20 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-1 text-sm font-black text-amber-400 text-center"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Object.keys(SUB_STAT_CONFIG).map(macroKey => {
+              const conf = SUB_STAT_CONFIG[macroKey];
+              const macroData = attributes[macroKey] || { override: null, subStats: {} };
+              const isOverridden = macroData.override !== null;
+              const currentComputed = calculateMacroStat(macroKey, attributes);
+
+              return (
+                <div key={macroKey} className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-sm text-neutral-100">{conf.label}</span>
+                      <span className={`text-base font-black ${getStatColor(currentComputed)}`}>{currentComputed}</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMacroOverride(macroKey)}
+                      className={`text-[11px] font-bold px-2 py-1 rounded transition-colors ${
+                        isOverridden 
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' 
+                          : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      {isOverridden ? '取消覆写' : '手动覆盖总分'}
+                    </button>
+                  </div>
+
+                  {isOverridden && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl space-y-2">
+                      <div className="flex justify-between items-center text-xs font-bold">
+                        <span className="text-amber-300">手动指定 {macroKey} 得分：</span>
+                        <span className="text-amber-400 font-black">{macroData.override}</span>
+                      </div>
+                      <input 
+                        type="range" min="1" max="99"
+                        value={macroData.override}
+                        onChange={(e) => handleMacroOverrideChange(macroKey, e.target.value)}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {Object.entries(conf.subStats).map(([subKey, subName]) => {
+                      const val = macroData.subStats[subKey] || 70;
+                      return (
+                        <div key={subKey} className="space-y-1">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-neutral-400 font-medium">{subName}</span>
+                            <input 
+                              type="number" min="1" max="99"
+                              value={val}
+                              onChange={(e) => handleSubStatChange(macroKey, subKey, e.target.value)}
+                              className={`w-12 bg-neutral-950 border border-neutral-800 rounded px-1.5 py-0.5 text-xs text-right font-bold ${getStatColor(val)}`}
+                            />
+                          </div>
+                          <input 
+                            type="range" min="1" max="99"
+                            value={val}
+                            onChange={(e) => handleSubStatChange(macroKey, subKey, e.target.value)}
+                            className="w-full accent-neutral-500 h-1 bg-neutral-950 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </form>
+      );
+    }
+
+    function MatchForm({ player, onSave }) {
+      const [formData, setFormData] = useState({
+        date: new Date().toISOString().split('T')[0],
+        opponent: '',
+        minutes: 90,
+        isStarter: true,
+        goals: 0,
+        assists: 0,
+        rating: 7.5,
+        notes: ''
+      });
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.opponent.trim()) return;
+
+        const matchData = {
+          id: `m_${Date.now()}`,
+          ...formData,
+          rating: parseFloat(formData.rating)
+        };
+
+        onSave(matchData);
+      };
+
+      return (
+        <form onSubmit={handleSubmit} className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+          <div className="bg-neutral-900/80 rounded-2xl border border-neutral-800 p-6 md:p-8 space-y-6">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+              <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <Plus className="text-amber-500" />
+                录入赛事记录 - <span className="text-amber-400">{player.profile.name}</span>
+              </h2>
+              <span className="text-xs text-neutral-400">当前 OVR: {calculateOVR(player)}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-neutral-400 font-bold block mb-1">比赛日期</label>
+                <input type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-400 font-bold block mb-1">对手球队</label>
+                <input type="text" placeholder="例: Real Madrid" value={formData.opponent} onChange={e => setFormData({...formData, opponent: e.target.value})} required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-neutral-400 font-bold block mb-1">出场分钟</label>
+                <input type="number" min="0" max="120" value={formData.minutes} onChange={e => setFormData({...formData, minutes: parseInt(e.target.value) || 0})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-400 font-bold block mb-1">进球数</label>
+                <input type="number" min="0" value={formData.goals} onChange={e => setFormData({...formData, goals: parseInt(e.target.value) || 0})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-400 font-bold block mb-1">助攻数</label>
+                <input type="number" min="0" value={formData.assists} onChange={e => setFormData({...formData, assists: parseInt(e.target.value) || 0})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-neutral-800">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-neutral-300 font-bold">赛后表现评分</label>
+                <span className={`font-black text-base ${getRatingColor(formData.rating)}`}>{formData.rating}</span>
+              </div>
+              <input 
+                type="range" min="1.0" max="10.0" step="0.1" 
+                value={formData.rating} 
+                onChange={e => setFormData({...formData, rating: e.target.value})} 
+                className="w-full accent-amber-500"
+              />
+            </div>
+            
+            <div>
+              <label className="text-xs text-neutral-400 font-bold block mb-1">比赛评价与心得</label>
+              <textarea 
+                rows="3" 
+                placeholder="记录关键助攻、精彩突破或短板..."
+                value={formData.notes} 
+                onChange={e => setFormData({...formData, notes: e.target.value})} 
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500 resize-none" 
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button type="submit" className="bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-black font-black px-8 py-2.5 rounded-xl shadow-lg shadow-amber-500/20 text-xs">
+                保存比赛记录
+              </button>
+            </div>
+          </div>
+        </form>
+      );
+    }
+
+    function MatchHistory({ player }) {
+      const matches = player.matches || [];
+
+      if (matches.length === 0) {
+        return (
+          <div className="flex flex-col items-center justify-center py-16 text-neutral-500 space-y-3">
+            <Activity className="w-12 h-12 opacity-30" />
+            <p className="text-sm font-bold">暂无比赛日志</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-4 max-w-3xl mx-auto">
+          <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+            <h2 className="text-base font-black text-white flex items-center gap-2">
+              <Clock className="text-amber-500" /> 比赛履历 - <span className="text-amber-400">{player.profile.name}</span>
+            </h2>
+            <span className="text-xs text-neutral-400">累计 {matches.length} 场记录</span>
+          </div>
+
+          <div className="grid gap-3">
+            {matches.slice().reverse().map((match) => (
+              <div key={match.id} className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-sm border ${match.rating >= 7.5 ? 'bg-emerald-950/50 text-emerald-400 border-emerald-900/50' : 'bg-neutral-800 text-neutral-300 border-neutral-700'}`}>
+                    {match.rating.toFixed(1)}
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-neutral-100">vs {match.opponent}</h4>
+                    <span className="text-[11px] text-neutral-500">{match.date} | 出战 {match.minutes} 分钟</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 bg-neutral-950/60 px-3 py-1.5 rounded-lg border border-neutral-800/60">
+                  <div className="text-center">
+                    <div className="text-[9px] font-bold text-neutral-500 uppercase">进球</div>
+                    <div className="font-black text-emerald-400 text-xs">{match.goals}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[9px] font-bold text-neutral-500 uppercase">助攻</div>
+                    <div className="font-black text-cyan-400 text-xs">{match.assists}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function PlayerManager({ players, activePlayer, setActivePlayerId, onAddNewPlayer, onDeletePlayer, onExport, onImport }) {
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [newName, setNewName] = useState('');
+      const [newPos, setNewPos] = useState('ST');
+
+      const handleCreate = (e) => {
+        e.preventDefault();
+        if (!newName.trim()) return;
+        onAddNewPlayer({
+          name: newName.trim(),
+          position: newPos,
+          nationality: "China",
+          club: "Unassigned",
+          age: 18,
+          potential: 90,
+          weakFoot: 3,
+          skillMoves: 3,
+          traits: ["Young Prospect"]
+        });
+        setNewName('');
+        setShowAddModal(false);
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <Users className="text-amber-500" /> 球员档案库 ({players.length})
+              </h2>
+              <button onClick={() => setShowAddModal(true)} className="bg-amber-500 hover:bg-amber-400 text-black px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1">
+                <Plus className="w-4 h-4" /> 创建球员
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {players.map(p => {
+                const isActive = p.id === activePlayer.id;
+                return (
+                  <div 
+                    key={p.id}
+                    onClick={() => setActivePlayerId(p.id)}
+                    className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      isActive 
+                        ? 'bg-amber-500/10 border-amber-500/50 shadow-md' 
+                        : 'bg-neutral-950/60 border-neutral-800/80 hover:border-neutral-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-black text-sm text-neutral-100 flex items-center gap-2">
+                        {p.profile.name}
+                        <span className="text-[10px] text-amber-400 bg-amber-500/20 px-1.5 py-0.5 rounded">{p.profile.position}</span>
+                      </div>
+                      <div className="text-xs text-neutral-500 mt-1">
+                        OVR: {calculateOVR(p)} | 场次: {p.matches?.length || 0}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isActive && <span className="text-[10px] font-bold text-amber-400 uppercase">焦点</span>}
+                      {players.length > 1 && (
+                        <button onClick={(e) => { e.stopPropagation(); onDeletePlayer(p.id); }} className="p-1 text-neutral-600 hover:text-rose-400">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800/80 p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div>
+              <h4 className="font-bold text-sm text-neutral-200">全量数据库迁移与备份</h4>
+              <p className="text-xs text-neutral-500">导出或回复包含多球员详细能力、细化子项目与履历的 JSON 数据。</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={onExport} className="flex items-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl font-bold text-xs border border-neutral-700">
+                <Download className="w-3.5 h-3.5" /> 导出 JSON
+              </button>
+              <label className="flex items-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl font-bold text-xs border border-neutral-700 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" /> 导入恢复
+                <input type="file" accept=".json" onChange={onImport} className="hidden" />
+              </label>
+            </div>
+          </div>
+
+          {showAddModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md space-y-4">
+                <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
+                  <h3 className="text-base font-black text-white">创建新球员档案</h3>
+                  <button onClick={() => setShowAddModal(false)} className="text-neutral-500 hover:text-white">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreate} className="space-y-4">
+                  <div>
+                    <label className="text-xs text-neutral-400 font-bold block mb-1">姓名</label>
+                    <input type="text" placeholder="例: Jude Bellingham" value={newName} onChange={e => setNewName(e.target.value)} required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-neutral-400 font-bold block mb-1">主打位置</label>
+                    <select value={newPos} onChange={e => setNewPos(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs focus:border-amber-500">
+                      {['ST', 'CF', 'LW', 'RW', 'CAM', 'CM', 'CDM', 'CB', 'LB', 'RB'].map(pos => (
+                        <option key={pos} value={pos}>{pos}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 rounded-lg text-xs font-bold text-neutral-400 hover:bg-neutral-800">取消</button>
+                    <button type="submit" className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-xs font-extrabold">确认创建</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function StatBox({ icon: Icon, label, value, color = "text-neutral-100" }) {
+      return (
+        <div className="bg-neutral-950/60 rounded-xl p-3 flex items-center gap-3 border border-neutral-800/50">
+          <div className={`p-2 rounded-lg bg-neutral-900 ${color}`}>
+            <Icon className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[10px] text-neutral-500 font-bold uppercase">{label}</div>
+            <div className={`text-lg font-black ${color}`}>{value}</div>
+          </div>
+        </div>
+      );
+    }
+
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+  </script>
+</body>
+</html>
